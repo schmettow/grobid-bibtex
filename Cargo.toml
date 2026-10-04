@@ -1,0 +1,26 @@
+[package]
+name = "grobid-bibtex"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "BibTeX and BibLaTeX bibliography management built on GROBID"
+license = "MIT"
+repository = "https://github.com/schmettow/grobid-bibtex"
+readme = "README.md"
+keywords = ["bibtex", "biblatex", "bibliography", "grobid", "tei"]
+categories = ["science", "text-processing", "command-line-utilities"]
+
+[features]
+# Forward the OpenAlex completion tier of the `grobid` client to the
+# `--openalex` option of the bundled binaries.
+openalex = ["grobid/openalex"]
+
+[dependencies]
+biblatex = "0.12"
+grobid = { path = "../grobid-rs", version = "0.6" }
+reqwest = { version = "0.13", default-features = false }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"
