@@ -58,3 +58,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extraction, completion, merge and rename logic lives in the crate's
   modules `extract`, `complete`, `collection` and `files`, so other tools
   can build on the same pipeline.
+
+### Quality
+
+- **Documentation**: every public item is documented
+  (`#![warn(missing_docs)]`); `cargo rustc --lib --all-features --
+  -D warnings` and `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps
+  --all-features` build without a warning. The crate docs and README
+  organize the library along the workflow (`extract`, `complete`,
+  `collection`, `bibtex`, `files`) and name the intended consumers
+  (editor plugins, RAG/LLM writing assistants).
+- **Test coverage** (`cargo llvm-cov -p grobid-bibtex --all-features`,
+  unit and integration tests; doctests are not measured on stable Rust):
+  `bibtex.rs` 97.4%, `files.rs` 91.0%, `collection.rs` 90.2%,
+  `extract.rs` 80.0% and `complete.rs` 63.0% line coverage — 91% across
+  the library modules. The CLI binaries are exercised by the live run
+  below rather than by unit tests.
+- **Verification**: `cargo fmt --check`, `cargo check --all-targets
+  --all-features`, `cargo clippy --all-targets --all-features --
+  -D warnings` and `cargo test --all-features` (33 unit tests, 1 binary
+  test, 2 integration tests and 15 doctests) all pass. Against a live
+  GROBID server at `http://localhost:8070`: `pdf2bibtex` extracted 2
+  entries from 2 PDFs; a second run with `--merge` skipped both as
+  duplicates; `--append` added them with `-2` keys; `--rename --link`
+  produced the keyed file name and a matching `file` field; `refs2bibtex`
+  extracted 76 references (27 + 49) from the same PDFs.
+
+## Roadmap
+
+Planned work beyond v0.1.0. The version numbers are intentions, not
+commitments.
+
+- **0.2.0 — Deduplifier trait**: extract duplicate detection into a trait,
+  so callers can plug in their own identity strategies (content,
+  identifiers, file names) instead of relying on the built-in ones.
+- **0.3.0 — fuzzy deduplifying**: add similarity-based matching for records
+  that have no identifiers and differ slightly in their metadata.
+- **0.4.0 — File level safety routines**: locking and write-event detection
+  for shared `.bib` files and manifests, so concurrent tools cannot corrupt
+  each other's writes.

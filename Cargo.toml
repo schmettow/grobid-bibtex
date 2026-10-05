@@ -6,9 +6,16 @@ rust-version = "1.85"
 description = "BibTeX and BibLaTeX bibliography management built on GROBID"
 license = "MIT"
 repository = "https://github.com/schmettow/grobid-bibtex"
+documentation = "https://docs.rs/grobid-bibtex"
 readme = "README.md"
+# Keep the agent instructions out of the published crate.
+exclude = ["AGENTS.md"]
 keywords = ["bibtex", "biblatex", "bibliography", "grobid", "tei"]
 categories = ["science", "text-processing", "command-line-utilities"]
+
+[package.metadata.docs.rs]
+# Document the `openalex` completion tier as well.
+all-features = true
 
 [features]
 # Forward the OpenAlex completion tier of the `grobid` client to the
@@ -17,6 +24,8 @@ openalex = ["grobid/openalex"]
 
 [dependencies]
 biblatex = "0.12"
+# Publish grobid 0.6.0 before publishing this crate: the version requirement
+# must resolve against crates.io during `cargo publish`.
 grobid = { path = "../grobid-rs", version = "0.6" }
 reqwest = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
