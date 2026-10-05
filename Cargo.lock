@@ -281,6 +281,8 @@ dependencies = [
  "biblatex",
  "grobid",
  "reqwest",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

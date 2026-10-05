@@ -23,8 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference lists.
 - `complete` (feature `openalex`): batch completion of extracted records
   against OpenAlex with the pacing the keyless pool expects.
-- `files`: recursive PDF discovery and the `Author_Year_Title` rename
-  policy, reported as `Rename` events.
+- `files`: recursive PDF discovery and the rename policy, reported as
+  `Rename` events; `rename_pdfs_with()` accepts any file-stem style
+  (`FileStemOptions`) and collision style (`Collision`, suffix or year).
+- `files::Manifest`: a JSON sidecar with size/mtime fingerprints of
+  processed files, so repeated extraction runs skip unchanged PDFs.
+- Integration tests with a mock GROBID server exercise `extract::headers`
+  end to end (HTTP client, multipart upload, TEI parser, worker pool); with
+  the `openalex` feature the completion path is covered too.
 - `bibtex::format_all()` for batches of records, in addition to the
   single-record formatting, key and file-naming helpers.
 - `pdf2bibtex`: `-a`/`--append` appends the extracted entries to an existing

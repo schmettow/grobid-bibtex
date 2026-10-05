@@ -18,7 +18,7 @@ assistants (structured, deduplicated bibliography data). The bundled
 | `complete` | Second-tier completion of extracted records against OpenAlex (feature `openalex`). |
 | `collection` | `Collection` parses, indexes and appends `.bib` files, assigns citation keys and merges records with duplicate detection (content, identifiers, PDF file name). |
 | `bibtex` | Rendering and naming for individual records: `format_entry()`, `format_all()`, `suggest_key()`, `unique_key()` and the `Author_Year_Title` file-name policies. |
-| `files` | The PDFs behind the records: recursive discovery and the rename policy. |
+| `files` | The PDFs behind the records: recursive discovery, the rename policy (`rename_pdfs_with()` with any file-stem style and collision style) and a `Manifest` that skips unchanged files on later runs. |
 
 The pipeline is: discover PDFs (`files`) → extract records (`extract`) →
 complete them (`complete`) → render and merge them into a collection
