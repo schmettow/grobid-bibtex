@@ -1,6 +1,6 @@
 [package]
 name = "grobid-bibtex"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.85"
 description = "BibTeX and BibLaTeX bibliography management built on GROBID"
@@ -26,7 +26,8 @@ openalex = ["grobid/openalex"]
 biblatex = "0.12"
 # Publish grobid 0.6.0 before publishing this crate: the version requirement
 # must resolve against crates.io during `cargo publish`.
-grobid = { path = "../grobid-rs", version = "0.6" }
+# grobid = { path = "../grobid-rs", version = "0.6" }
+grobid = "0.6.0"
 reqwest = { version = "0.13", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
