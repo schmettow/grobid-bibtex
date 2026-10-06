@@ -2,7 +2,9 @@
 //!
 //! Directory discovery for extraction batches, the rename policy of
 //! `pdf2bibtex`, and a sidecar [`Manifest`] that makes repeated batch runs
-//! skip files that have not changed.
+//! skip files that have not changed. The manifest can cache each processed
+//! file's extracted record, so a bibliography can be rebuilt from it without
+//! querying GROBID and OpenAlex again.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -197,9 +199,15 @@ pub enum ManifestError {
 /// 3. [`Manifest::record`] each processed file (under its final name),
 /// 4. [`Manifest::prune`] files that no longer exist, and
 /// 5. [`Manifest::save`].
+///
+/// With [`Manifest::record_with_biblio`], a processed file's extracted
+/// record is cached alongside its fingerprint and can be read back with
+/// [`Manifest::biblio`]; [`Manifest::record`] refreshes a fingerprint without
+/// dropping a cached record. The JSON is compatible with manifests written
+/// before records were cached.
 pub struct Manifest {
     path: PathBuf,
-    files: HashMap<String, Fingerprint>,
+    files: HashMap<String, FileRecord>,
 }
 
 /// A file's identity: size and modification time in whole seconds.
@@ -209,11 +217,28 @@ struct Fingerprint {
     mtime: u64,
 }
 
+/// A processed file: its fingerprint and, when extraction ran, its record.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+struct FileRecord {
+    size: u64,
+    mtime: u64,
+    /// The extracted and completed bibliographic record, when cached.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    biblio: Option<Biblio>,
+}
+
+impl FileRecord {
+    /// Whether the file still has the recorded fingerprint.
+    fn matches(&self, fingerprint: &Fingerprint) -> bool {
+        self.size == fingerprint.size && self.mtime == fingerprint.mtime
+    }
+}
+
 /// The on-disk JSON shape of a [`Manifest`].
 #[derive(Default, Serialize, Deserialize)]
 struct ManifestData {
     #[serde(default)]
-    files: HashMap<String, Fingerprint>,
+    files: HashMap<String, FileRecord>,
 }
 
 impl Manifest {
@@ -260,14 +285,54 @@ impl Manifest {
         let Some(fingerprint) = fingerprint(file) else {
             return false;
         };
-        self.files.get(&Self::key(folder, file)) == Some(&fingerprint)
+        self.files
+            .get(&Self::key(folder, file))
+            .is_some_and(|record| record.matches(&fingerprint))
     }
 
-    /// Record (or update) the fingerprint of `file`.
+    /// Record (or update) the fingerprint of `file`, keeping a cached record
+    /// that [`Manifest::record_with_biblio`] stored earlier.
     pub fn record(&mut self, folder: &Path, file: &Path) {
-        if let Some(fingerprint) = fingerprint(file) {
-            self.files.insert(Self::key(folder, file), fingerprint);
+        let Some(fingerprint) = fingerprint(file) else {
+            return;
+        };
+        let key = Self::key(folder, file);
+        match self.files.get_mut(&key) {
+            Some(record) => {
+                record.size = fingerprint.size;
+                record.mtime = fingerprint.mtime;
+            }
+            None => {
+                self.files.insert(
+                    key,
+                    FileRecord {
+                        size: fingerprint.size,
+                        mtime: fingerprint.mtime,
+                        biblio: None,
+                    },
+                );
+            }
         }
+    }
+
+    /// Record the fingerprint of `file` together with its extracted record.
+    pub fn record_with_biblio(&mut self, folder: &Path, file: &Path, biblio: &Biblio) {
+        let Some(fingerprint) = fingerprint(file) else {
+            return;
+        };
+        self.files.insert(
+            Self::key(folder, file),
+            FileRecord {
+                size: fingerprint.size,
+                mtime: fingerprint.mtime,
+                biblio: Some(biblio.clone()),
+            },
+        );
+    }
+
+    /// The cached record of `file`, if one was recorded.
+    pub fn biblio(&self, folder: &Path, file: &Path) -> Option<&Biblio> {
+        self.files.get(&Self::key(folder, file))?.biblio.as_ref()
     }
 
     /// Drop entries whose file no longer exists under `folder`.
@@ -488,5 +553,74 @@ mod tests {
         let manifest = Manifest::load(&path).expect("reload manifest");
         assert!(manifest.is_unchanged(dir.path(), &kept));
         assert!(!manifest.is_unchanged(dir.path(), &gone));
+    }
+
+    #[test]
+    fn test_manifest_caches_biblio() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("paper.pdf");
+        std::fs::write(&file, b"pdf").expect("write");
+        let path = dir.path().join(".manifest.json");
+        let biblio = record("Kahle", "2000", "The Barc model");
+        let mut manifest = Manifest::empty(&path);
+        assert!(manifest.biblio(dir.path(), &file).is_none());
+
+        manifest.record_with_biblio(dir.path(), &file, &biblio);
+        assert_eq!(manifest.biblio(dir.path(), &file), Some(&biblio));
+        manifest.save().expect("save manifest");
+
+        let mut manifest = Manifest::load(&path).expect("load manifest");
+        assert!(manifest.is_unchanged(dir.path(), &file));
+        assert_eq!(manifest.biblio(dir.path(), &file), Some(&biblio));
+
+        // Refreshing the fingerprint keeps the cached record.
+        manifest.record(dir.path(), &file);
+        assert!(manifest.is_unchanged(dir.path(), &file));
+        assert_eq!(manifest.biblio(dir.path(), &file), Some(&biblio));
+
+        // Re-recording with a new record replaces the cache.
+        let newer = record("Kahle", "2001", "Second edition");
+        manifest.record_with_biblio(dir.path(), &file, &newer);
+        assert_eq!(manifest.biblio(dir.path(), &file), Some(&newer));
+
+        // Pruning a deleted file drops its record too.
+        std::fs::remove_file(&file).expect("remove file");
+        manifest.prune(dir.path());
+        assert!(manifest.biblio(dir.path(), &file).is_none());
+    }
+
+    #[test]
+    fn test_manifest_loads_legacy_json_without_records() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("paper.pdf");
+        std::fs::write(&file, b"pdf").expect("write");
+        let path = dir.path().join(".manifest.json");
+        // The manifest format before records were cached: only fingerprints.
+        let metadata = std::fs::metadata(&file).expect("metadata");
+        let mtime = metadata
+            .modified()
+            .expect("mtime")
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("after epoch")
+            .as_secs();
+        std::fs::write(
+            &path,
+            format!(
+                "{{\"files\":{{\"paper.pdf\":{{\"size\":{},\"mtime\":{mtime}}}}}}}",
+                metadata.len()
+            ),
+        )
+        .expect("write legacy manifest");
+
+        let mut manifest = Manifest::load(&path).expect("legacy manifest loads");
+        assert!(manifest.is_unchanged(dir.path(), &file));
+        assert!(manifest.biblio(dir.path(), &file).is_none());
+
+        // Caching a record upgrades the entry in place.
+        let biblio = record("Kahle", "2000", "The Barc model");
+        manifest.record_with_biblio(dir.path(), &file, &biblio);
+        manifest.save().expect("save upgraded manifest");
+        let manifest = Manifest::load(&path).expect("reload");
+        assert_eq!(manifest.biblio(dir.path(), &file), Some(&biblio));
     }
 }

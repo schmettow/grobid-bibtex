@@ -73,6 +73,38 @@ pub enum RenderError {
     },
 }
 
+/// Errors from merging records into a `.bib` file.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum MergeError {
+    /// The target file could not be read or parsed.
+    #[error(transparent)]
+    Load(#[from] LoadError),
+    /// A rendered entry could not be parsed back for duplicate detection.
+    #[error(transparent)]
+    Render(#[from] RenderError),
+    /// The merged entries could not be written.
+    #[error("cannot write {path}: {source}")]
+    Write {
+        /// The file that could not be written.
+        path: PathBuf,
+        /// The underlying I/O error.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+/// The outcome of merging records into a `.bib` file.
+#[derive(Debug)]
+pub struct MergeReport {
+    /// The newly rendered entries, in the order they were appended.
+    pub entries: Vec<(PathBuf, String)>,
+    /// The records skipped because they were already in the file.
+    pub duplicates: usize,
+    /// The number of entries in the file after the merge.
+    pub total: usize,
+}
+
 /// An in-memory BibTeX/BibLaTeX collection.
 ///
 /// The parsed [`biblatex::Bibliography`] is the source of truth; citation
@@ -116,6 +148,27 @@ impl Collection {
             source,
         })?;
         Ok(Self::from_bibliography(bibliography))
+    }
+
+    /// Read and parse a collection from a `.bib` file; a missing file starts
+    /// as an empty collection.
+    ///
+    /// This is [`Collection::load`] for maintained files that should be
+    /// created on the first merge.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LoadError`] if the file exists but cannot be read or is not
+    /// a valid bibliography.
+    pub fn load_or_new(path: &Path) -> Result<Self, LoadError> {
+        match Self::load(path) {
+            Err(LoadError::Read { source, .. })
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                Ok(Self::new())
+            }
+            other => other,
+        }
     }
 
     fn from_bibliography(bibliography: Bibliography) -> Self {
@@ -226,7 +279,7 @@ impl Default for Collection {
 }
 
 /// Append rendered BibTeX to the file at `path`, separating it from the
-/// existing content with one blank line.
+/// existing content with one blank line. A missing file is created.
 ///
 /// # Errors
 ///
@@ -235,7 +288,11 @@ impl Default for Collection {
 pub fn append(path: &Path, bibtex: &str) -> std::io::Result<()> {
     use std::io::Write;
 
-    let existing = std::fs::read_to_string(path)?;
+    let existing = match std::fs::read_to_string(path) {
+        Ok(existing) => existing,
+        Err(source) if source.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(source) => return Err(source),
+    };
     let mut addition = String::new();
     if !existing.is_empty() {
         if !existing.ends_with('\n') {
@@ -248,9 +305,79 @@ pub fn append(path: &Path, bibtex: &str) -> std::io::Result<()> {
     addition.push_str(bibtex);
     addition.push('\n');
     std::fs::OpenOptions::new()
+        .create(true)
         .append(true)
         .open(path)?
         .write_all(addition.as_bytes())
+}
+
+/// Merge `records` into the BibTeX file at `path` and append the new entries.
+///
+/// The file is read first — a missing file starts as an empty collection —
+/// and records already present in it are skipped, matching normalized field
+/// content, identifiers (DOI, PMID, PMCID, arXiv) or PDF file names, like
+/// [`Collection::merge_all`]. New entries get collision-free citation keys
+/// and are appended; existing content is never modified. With `link`, each
+/// new entry records its PDF's path in a `file` field, so the same record is
+/// recognized by file name on later runs.
+///
+/// ```
+/// use std::path::PathBuf;
+///
+/// use grobid_bibtex::collection;
+/// use grobid_bibtex::{Author, Biblio};
+///
+/// let dir = std::env::temp_dir().join(format!("grobid-merge-doc-{}", std::process::id()));
+/// std::fs::create_dir_all(&dir)?;
+/// let path = dir.join("refs.bib");
+/// let record = Biblio {
+///     authors: vec![Author {
+///         surname: Some("Kahle".to_string()),
+///         ..Author::default()
+///     }],
+///     date: Some("2000".to_string()),
+///     ..Biblio::default()
+/// };
+///
+/// let report = collection::merge_file(&path, &[(PathBuf::from("paper.pdf"), record)], true)?;
+/// assert_eq!(report.entries.len(), 1);
+/// assert_eq!(report.total, 1);
+/// // The record is in the file now: a second merge skips it.
+/// let report = collection::merge_file(&path, &[(PathBuf::from("paper.pdf"), Biblio::default())], true)?;
+/// assert!(report.entries.is_empty());
+/// assert_eq!(report.duplicates, 1);
+/// # std::fs::remove_dir_all(&dir)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns [`MergeError`] when the file cannot be read or parsed, a rendered
+/// entry cannot be parsed back for duplicate detection, or the new entries
+/// cannot be written.
+pub fn merge_file(
+    path: &Path,
+    records: &[(PathBuf, Biblio)],
+    link: bool,
+) -> Result<MergeReport, MergeError> {
+    let mut collection = Collection::load_or_new(path)?;
+    let (entries, duplicates) = collection.merge_all(records, link)?;
+    if !entries.is_empty() {
+        let bibtex = entries
+            .iter()
+            .map(|(_, entry)| entry.as_str())
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        append(path, &bibtex).map_err(|source| MergeError::Write {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    }
+    Ok(MergeReport {
+        entries,
+        duplicates,
+        total: collection.len(),
+    })
 }
 
 /// The identity of a record for duplicate detection.
@@ -755,6 +882,206 @@ mod tests {
             std::fs::read_to_string(&path).expect("read"),
             "@misc{a,\n}\n"
         );
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    /// A unique scratch directory for merge-file tests.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("grobid-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn test_load_or_new() {
+        let dir = scratch("load-or-new");
+        let path = dir.join("refs.bib");
+        // Missing file: empty, no error.
+        let collection = Collection::load_or_new(&path).expect("missing file is new");
+        assert!(collection.is_empty());
+        assert!(!path.exists(), "loading must not create the file");
+        // Existing file: parsed.
+        std::fs::write(&path, "@misc{a,\n  title = {One},\n}\n").expect("write");
+        let collection = Collection::load_or_new(&path).expect("load existing");
+        assert_eq!(collection.len(), 1);
+        assert!(collection.keys().contains("a"));
+        // Corrupt file: the parse error is reported, not swallowed.
+        std::fs::write(&path, "@misc{broken,\n  title = {Unclosed").expect("write");
+        assert!(matches!(
+            Collection::load_or_new(&path),
+            Err(LoadError::Parse { .. })
+        ));
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_creates_and_is_idempotent() {
+        let dir = scratch("merge-file-idempotent");
+        let path = dir.join("refs.bib");
+        let records = vec![
+            (
+                PathBuf::from("a.pdf"),
+                record("Smith", "2020", Some("10.1/a")),
+            ),
+            (PathBuf::from("b.pdf"), record("Jones", "2021", None)),
+        ];
+        // The missing file is created by the first merge.
+        let report = merge_file(&path, &records, true).expect("first merge");
+        assert_eq!(report.entries.len(), 2, "{report:?}");
+        assert_eq!(report.duplicates, 0);
+        assert_eq!(report.total, 2);
+        let text = std::fs::read_to_string(&path).expect("read merged bib");
+        assert!(text.ends_with('\n'), "{text}");
+        assert_eq!(
+            Bibliography::parse(&text)
+                .expect("merged file parses")
+                .len(),
+            2
+        );
+
+        // The same batch finds both records and leaves the file unchanged.
+        let report = merge_file(&path, &records, true).expect("second merge");
+        assert!(report.entries.is_empty(), "{report:?}");
+        assert_eq!(report.duplicates, 2);
+        assert_eq!(report.total, 2);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read again"),
+            text,
+            "a duplicate-only merge must not touch the file"
+        );
+
+        // A mixed batch: one duplicate by DOI, one new record whose
+        // suggested key collides (suffixed), and one new record.
+        let report = merge_file(
+            &path,
+            &[
+                (
+                    PathBuf::from("c.pdf"),
+                    record("Smith", "2020", Some("10.1/a")),
+                ),
+                (PathBuf::from("e.pdf"), record("Smith", "2020", None)),
+                (PathBuf::from("d.pdf"), record("Ng", "2022", None)),
+            ],
+            false,
+        )
+        .expect("mixed merge");
+        assert_eq!(report.duplicates, 1);
+        assert_eq!(report.entries.len(), 2);
+        let keys: Vec<&str> = report
+            .entries
+            .iter()
+            .map(|(_, entry)| entry.lines().next().unwrap())
+            .collect();
+        assert_eq!(keys, vec!["@misc{Ng2022,", "@misc{Smith2020-2,"]);
+        assert_eq!(report.total, 4);
+        let text = std::fs::read_to_string(&path).expect("read final");
+        assert_eq!(Bibliography::parse(&text).expect("parses").len(), 4);
+        assert!(text.contains("@misc{Smith2020-2,"), "{text}");
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_link_field() {
+        let dir = scratch("merge-file-link");
+        let path = dir.join("linked.bib");
+        let records = vec![(PathBuf::from("papers/a.pdf"), record("Smith", "2020", None))];
+        merge_file(&path, &records, true).expect("linked merge");
+        let linked = std::fs::read_to_string(&path).expect("read");
+        assert!(linked.contains("file = {papers/a.pdf},"), "{linked}");
+
+        let path = dir.join("plain.bib");
+        merge_file(&path, &records, false).expect("plain merge");
+        let plain = std::fs::read_to_string(&path).expect("read");
+        assert!(!plain.contains("file = "), "{plain}");
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_skips_identifier_and_file_name() {
+        let dir = scratch("merge-file-identity");
+        let path = dir.join("refs.bib");
+        // A hand-written entry with an identifier and a `file` field.
+        let existing = record("Smith", "2020", Some("https://doi.org/10.1234/ABC.1"));
+        let rendered =
+            bibtex::format_entry_with_file("handwritten", &existing, "/papers/Paper.PDF");
+        std::fs::write(&path, format!("{rendered}\n")).expect("write");
+
+        // Different metadata, same DOI and same file name: both records hit
+        // existing entries, although only the DOI comes from the collection
+        // and the file name only from the record path.
+        let mut doi_twin = record("Smith", "2020", Some("doi:10.1234/abc.1"));
+        doi_twin.title = Some("Other title".to_string());
+        let mut file_twin = record("Jones", "2021", None);
+        file_twin.title = Some("Different".to_string());
+        let report = merge_file(
+            &path,
+            &[
+                (PathBuf::from("one.pdf"), doi_twin),
+                (PathBuf::from("/elsewhere/paper.pdf"), file_twin),
+            ],
+            false,
+        )
+        .expect("merge");
+        assert!(report.entries.is_empty(), "{report:?}");
+        assert_eq!(report.duplicates, 2);
+        assert_eq!(report.total, 1);
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            format!("{rendered}\n")
+        );
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_corrupt_target_is_untouched() {
+        let dir = scratch("merge-file-corrupt");
+        let path = dir.join("refs.bib");
+        std::fs::write(&path, "@misc{broken,\n  title = {Unclosed").expect("write");
+        let error = merge_file(
+            &path,
+            &[(PathBuf::from("a.pdf"), record("Smith", "2020", None))],
+            false,
+        )
+        .expect_err("corrupt target must fail");
+        assert!(matches!(error, MergeError::Load(LoadError::Parse { .. })));
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read"),
+            "@misc{broken,\n  title = {Unclosed"
+        );
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_empty_batch_leaves_missing_file() {
+        let dir = scratch("merge-file-empty");
+        let path = dir.join("refs.bib");
+        let report = merge_file(&path, &[], true).expect("empty merge");
+        assert!(report.entries.is_empty());
+        assert_eq!(report.total, 0);
+        assert!(
+            !path.exists(),
+            "an empty merge must not create the target file"
+        );
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_merge_file_appends_with_separator() {
+        let dir = scratch("merge-file-separator");
+        let path = dir.join("refs.bib");
+        // No trailing newline in the existing content.
+        std::fs::write(&path, "@misc{old,\n  title = {Old},\n}").expect("write");
+        let report = merge_file(
+            &path,
+            &[(PathBuf::from("a.pdf"), record("Smith", "2020", None))],
+            false,
+        )
+        .expect("merge");
+        assert_eq!(report.entries.len(), 1);
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(text.contains("\n\n@misc{Smith2020,"), "{text}");
+        assert!(text.ends_with('\n'), "{text}");
+        assert_eq!(Bibliography::parse(&text).expect("parses").len(), 2);
         std::fs::remove_dir_all(&dir).expect("remove temp dir");
     }
 }

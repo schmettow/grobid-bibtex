@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- `collection::merge_file()` merges records into a `.bib` file in one step:
+  it reads the file (a missing file starts empty), skips records that are
+  already present (normalized content, identifiers, PDF file name), appends
+  the new entries and returns a `MergeReport` with the added entries, the
+  duplicate count and the resulting size. `Collection::load_or_new()` parses
+  a file that may not exist yet, and `append()` now creates a missing file.
+  `pdf2bibtex --merge` uses the new function, removing its duplicated
+  merge-and-append code.
+- `files::Manifest` can cache each processed file's extracted record:
+  `record_with_biblio()` stores the fingerprint together with the `Biblio`,
+  `biblio()` reads it back, and `record()` refreshes a fingerprint without
+  dropping a cached record. The JSON is compatible with manifests written
+  before records were cached, so a corpus can rebuild its bibliography
+  without querying GROBID and OpenAlex again.
+
 ## v0.1.1
 
 ### Fixed

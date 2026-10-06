@@ -124,7 +124,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     // With `--append` and `--merge`, load the target collection first: no PDF
     // must be processed (or renamed) when its keys cannot be determined,
     // and its keys and duplicate index drive the output below.
-    let mut collection = match &args.destination {
+    let collection = match &args.destination {
         Destination::Append(path) => {
             let collection = Collection::load(path)?;
             println!(
@@ -269,11 +269,20 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Assign deterministic, collision-free keys and format the entries.
-    // With `--merge`, records already present in the collection are left out.
-    let (entries, duplicates) = match &args.destination {
-        Destination::Merge(_) => collection.merge_all(&results, args.link)?,
-        _ => (collection.format_all(&results, args.link), 0),
-    };
+    // With `--merge`, records already present in the file are left out: the
+    // library function reloads the file, merges and appends in one step.
+    if let Destination::Merge(path) = &args.destination {
+        let report = collection::merge_file(path, &results, args.link)?;
+        println!(
+            "merged {} into {} ({} duplicate(s) skipped, {} failed)",
+            entry_count(report.entries.len()),
+            path.display(),
+            report.duplicates,
+            failures
+        );
+        return Ok(());
+    }
+    let entries = collection.format_all(&results, args.link);
     let bibtex = entries
         .iter()
         .map(|(_, entry)| entry.as_str())
@@ -293,15 +302,7 @@ async fn run(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 failures
             );
         }
-        Destination::Merge(path) => {
-            collection::append(path, &bibtex)?;
-            println!(
-                "merged {count} into {} ({} duplicate(s) skipped, {} failed)",
-                path.display(),
-                duplicates,
-                failures
-            );
-        }
+        Destination::Merge(_) => unreachable!("handled by the early merge return"),
     }
     Ok(())
 }

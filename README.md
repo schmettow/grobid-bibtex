@@ -16,9 +16,9 @@ assistants (structured, deduplicated bibliography data). The bundled
 | --- | --- |
 | `extract` | PDFs into records with GROBID: batch `headers()` and `references()`, plus `collect_references()` for flattening, DOI-deduplicating and ordering extracted reference lists. |
 | `complete` | Second-tier completion of extracted records against OpenAlex (feature `openalex`). |
-| `collection` | `Collection` parses, indexes and appends `.bib` files, assigns citation keys and merges records with duplicate detection (content, identifiers, PDF file name). |
+| `collection` | `Collection` parses, indexes and appends `.bib` files, assigns citation keys and merges records with duplicate detection (content, identifiers, PDF file name); `merge_file()` merges records into a file in one step, `load_or_new()` handles files that do not exist yet. |
 | `bibtex` | Rendering and naming for individual records: `format_entry()`, `format_all()`, `suggest_key()`, `unique_key()` and the `Author_Year_Title` file-name policies. |
-| `files` | The PDFs behind the records: recursive discovery, the rename policy (`rename_pdfs_with()` with any file-stem style and collision style) and a `Manifest` that skips unchanged files on later runs. |
+| `files` | The PDFs behind the records: recursive discovery, the rename policy (`rename_pdfs_with()` with any file-stem style and collision style) and a `Manifest` that skips unchanged files on later runs and can cache each processed file's extracted record. |
 
 The pipeline is: discover PDFs (`files`) → extract records (`extract`) →
 complete them (`complete`) → render and merge them into a collection
@@ -51,6 +51,35 @@ assert!(entries[0].1.contains("file = {paper.pdf},"));
 let (entries, duplicates) = collection.merge_all(&records, true).unwrap();
 assert_eq!(duplicates, 1);
 assert!(entries.is_empty());
+```
+
+To keep a `.bib` file in sync with a corpus, `collection::merge_file()`
+combines the steps: it reads the file (a missing file starts empty), skips
+records that are already present, appends the new entries and reports what
+happened. Existing entries are never modified or removed.
+
+```rust
+use std::path::PathBuf;
+
+use grobid_bibtex::collection;
+use grobid_bibtex::{Author, Biblio};
+
+# let dir = std::env::temp_dir().join(format!("readme-merge-{}", std::process::id()));
+# std::fs::create_dir_all(&dir).unwrap();
+let biblio = Biblio {
+    authors: vec![Author {
+        surname: Some("Kahle".to_string()),
+        ..Author::default()
+    }],
+    date: Some("2000".to_string()),
+    ..Biblio::default()
+};
+let path = dir.join("refs.bib");
+let report = collection::merge_file(&path, &[(PathBuf::from("paper.pdf"), biblio)], true)
+    .unwrap();
+assert_eq!(report.entries.len(), 1);
+assert_eq!(report.total, 1);
+# std::fs::remove_dir_all(&dir).unwrap();
 ```
 
 Beyond `Collection`, the `bibtex` module provides the single-record helpers:
