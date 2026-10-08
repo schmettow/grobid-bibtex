@@ -39,13 +39,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tests, 1 binary test, 2 integration tests and 17 doctests) all pass.
   `cargo package --list` ships the expected 17 files (with `AGENTS.md`
   excluded), and `cargo publish --dry-run` packages and verifies the
-  crate (216.6 KiB, 53.8 KiB compressed) with `grobid` 0.6.0 resolved
+  crate (217.9 KiB, 54.0 KiB compressed) with `grobid` 0.6.0 resolved
   from crates.io.  Against a live GROBID server at
   `http://localhost:8070`: `pdf2bibtex` extracted 2 entries from 2 PDFs;
   a second run with `--merge` skipped both as duplicates; `--append`
-  added them with `-2` keys; `--rename --link` produced the keyed file
-  names with matching `file` fields; `refs2bibtex` collected 84
-  references (27 + 57) from the same PDFs.
+  added them with `-2` keys; `--rename --link` produced the
+  `Author_<title words>` file names with matching `file` fields;
+  `refs2bibtex` extracted 24 + 27 references from the same PDFs and
+  collected 30 after dropping 21 DOI duplicates.
 
 ## v0.1.1
 
