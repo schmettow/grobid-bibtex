@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.2.0
 
 ### Added
 
@@ -23,6 +23,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dropping a cached record. The JSON is compatible with manifests written
   before records were cached, so a corpus can rebuild its bibliography
   without querying GROBID and OpenAlex again.
+
+### Quality
+
+- **Test coverage** (`cargo llvm-cov -p grobid-bibtex --all-features`,
+  unit and integration tests; doctests are not measured on stable Rust):
+  `bibtex.rs` 97.4%, `collection.rs` 93.5%, `files.rs` 92.5%,
+  `extract.rs` 80.0% and `complete.rs` 63.0% line coverage — 92% across
+  the library modules.  The CLI binaries are exercised by the live run
+  below rather than by unit tests.
+- **Verification**: `cargo fmt --check`, `cargo check --all-targets
+  --all-features`, `cargo clippy --all-targets --all-features --
+  -D warnings`, `cargo doc --no-deps --all-features` (with
+  `RUSTDOCFLAGS="-D warnings"`) and `cargo test --all-features` (42 unit
+  tests, 1 binary test, 2 integration tests and 17 doctests) all pass.
+  `cargo package --list` ships the expected 17 files (with `AGENTS.md`
+  excluded), and `cargo publish --dry-run` packages and verifies the
+  crate (216.6 KiB, 53.8 KiB compressed) with `grobid` 0.6.0 resolved
+  from crates.io.  Against a live GROBID server at
+  `http://localhost:8070`: `pdf2bibtex` extracted 2 entries from 2 PDFs;
+  a second run with `--merge` skipped both as duplicates; `--append`
+  added them with `-2` keys; `--rename --link` produced the keyed file
+  names with matching `file` fields; `refs2bibtex` collected 84
+  references (27 + 57) from the same PDFs.
 
 ## v0.1.1
 
@@ -111,14 +134,14 @@ Cargo.toml: grobid dependency from local to crates.io.
 
 ## Roadmap
 
-Planned work beyond v0.1.0. The version numbers are intentions, not
+Planned work beyond v0.2.0. The version numbers are intentions, not
 commitments.
 
-- **0.2.0 — Deduplifier trait**: extract duplicate detection into a trait,
+- **0.3.0 — Deduplifier trait**: extract duplicate detection into a trait,
   so callers can plug in their own identity strategies (content,
   identifiers, file names) instead of relying on the built-in ones.
-- **0.3.0 — fuzzy deduplifying**: add similarity-based matching for records
+- **0.4.0 — fuzzy deduplifying**: add similarity-based matching for records
   that have no identifiers and differ slightly in their metadata.
-- **0.4.0 — File level safety routines**: locking and write-event detection
+- **0.5.0 — File level safety routines**: locking and write-event detection
   for shared `.bib` files and manifests, so concurrent tools cannot corrupt
   each other's writes.
