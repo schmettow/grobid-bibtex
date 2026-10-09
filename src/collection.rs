@@ -105,6 +105,33 @@ pub struct MergeReport {
     pub total: usize,
 }
 
+/// A citation key with the PDF it links to.
+///
+/// This is the lookup shape of citation-aware tools (editor pickers, chat
+/// assistants): [`Collection::cite_entries`] lists every entry and
+/// [`Collection::cite_entry`] resolves one key, both returning plain data
+/// instead of the underlying `biblatex` types. The name avoids the
+/// `Citation` type that the `grobid` client re-exports at the crate root.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CiteEntry {
+    /// The canonical citation key as spelled in the bibliography.
+    pub key: String,
+    /// The PDF recorded in the entry's `file` field (or its `pdf` alias).
+    pub file: Option<PathBuf>,
+}
+
+impl CiteEntry {
+    /// The cite view of a parsed entry.
+    fn of(entry: &Entry) -> Self {
+        Self {
+            key: entry.key.clone(),
+            file: entry_text(entry, "file")
+                .or_else(|| entry_text(entry, "pdf"))
+                .map(PathBuf::from),
+        }
+    }
+}
+
 /// An in-memory BibTeX/BibLaTeX collection.
 ///
 /// The parsed [`biblatex::Bibliography`] is the source of truth; citation
@@ -189,6 +216,25 @@ impl Collection {
     /// The citation keys of all entries.
     pub fn keys(&self) -> &HashSet<String> {
         &self.keys
+    }
+
+    /// Every entry as a [`CiteEntry`] (canonical key plus linked PDF), in
+    /// bibliography order.
+    pub fn cite_entries(&self) -> impl Iterator<Item = CiteEntry> + '_ {
+        self.bibliography.iter().map(CiteEntry::of)
+    }
+
+    /// Resolve one citation key to its entry: an exact match first, then an
+    /// ASCII case-insensitive match. The canonical key is returned in
+    /// either case; a key that matches no entry is `None`.
+    pub fn cite_entry(&self, key: &str) -> Option<CiteEntry> {
+        if let Some(entry) = self.bibliography.get(key) {
+            return Some(CiteEntry::of(entry));
+        }
+        self.bibliography
+            .iter()
+            .find(|entry| entry.key.eq_ignore_ascii_case(key))
+            .map(CiteEntry::of)
     }
 
     /// The number of entries.
@@ -850,6 +896,50 @@ mod tests {
         assert_eq!(collection.len(), 2);
         assert!(collection.keys().contains("Jones2021"));
         std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_cite_entries_list_keys_and_files() {
+        let dir = scratch("cite-entries");
+        let path = dir.join("refs.bib");
+        std::fs::write(
+            &path,
+            "@misc{Smith2020,\n  file = {papers/a.pdf},\n}\n\
+             @misc{Jones2021,\n  pdf = {papers/b.pdf},\n}\n\
+             @misc{NoFile2022,\n  title = {C},\n}\n",
+        )
+        .expect("write bib");
+        let collection = Collection::load(&path).expect("load");
+
+        let entries: Vec<CiteEntry> = collection.cite_entries().collect();
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].key, "Smith2020");
+        assert_eq!(entries[0].file, Some(PathBuf::from("papers/a.pdf")));
+        // The `pdf` alias is read as well.
+        assert_eq!(entries[1].file, Some(PathBuf::from("papers/b.pdf")));
+        // An entry without a linked file keeps its key.
+        assert_eq!(entries[2].key, "NoFile2022");
+        assert_eq!(entries[2].file, None);
+
+        std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_cite_entry_matches_exactly_then_case_insensitively() {
+        let source = "@misc{Smith2020,\n  file = {a.pdf},\n}\n\
+                      @misc{smith2020-2,\n  file = {b.pdf},\n}\n";
+        let collection = Collection::parse(source).expect("parse");
+
+        // Exact match wins over a case-insensitive one.
+        let exact = collection.cite_entry("smith2020-2").expect("exact");
+        assert_eq!(exact.key, "smith2020-2");
+        assert_eq!(exact.file, Some(PathBuf::from("b.pdf")));
+
+        // A differently-cased key resolves to the canonical spelling.
+        let folded = collection.cite_entry("SMITH2020").expect("folded");
+        assert_eq!(folded.key, "Smith2020");
+
+        assert!(collection.cite_entry("Unknown2024").is_none());
     }
 
     #[test]

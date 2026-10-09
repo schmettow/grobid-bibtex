@@ -5,6 +5,18 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.2.1
+
+### Added
+
+- `collection::CiteEntry` plus `Collection::cite_entries()` and
+  `Collection::cite_entry()`: look up entries by citation key (exact first,
+  then ASCII case-insensitive) and list every entry as plain data — the
+  canonical key and the PDF recorded in the `file` field (or its `pdf`
+  alias). Chat assistants and editor pickers can resolve `@key` references
+  without touching the `biblatex` types. The name avoids the `Citation`
+  type that the `grobid` client re-exports at the crate root.
+
 ## v0.2.0
 
 ### Added
