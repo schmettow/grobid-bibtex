@@ -17,6 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without touching the `biblatex` types. The name avoids the `Citation`
   type that the `grobid` client re-exports at the crate root.
 
+### Quality
+
+- **Test coverage** (`cargo llvm-cov --all-features`; unit, integration
+  and binary tests; doctests are not measured on stable Rust): `bibtex.rs`
+  97.4%, `collection.rs` 93.9%, `files.rs` 92.5%, `extract.rs` 80.0% and
+  `complete.rs` 63.0% line coverage — ≈92% across the library modules.
+  The CLI binaries are exercised by live runs rather than unit tests
+  (`bin/pdf2bibtex.rs` 10.9%, `bin/refs2bibtex.rs` 0.0%).
+- **Verification**: `cargo fmt --check`, `cargo check --locked
+  --all-targets --all-features`, `cargo clippy --locked --all-targets
+  --all-features -- -D warnings`, `cargo doc --no-deps --all-features`
+  (0 warnings) and `cargo test --all-features` (44 unit tests, 1 binary
+  test, 2 integration tests and 17 doctests) are all green.
+  `cargo package --list` ships the expected 17 files (with `AGENTS.md`
+  excluded), and `cargo publish --dry-run` packages and verifies the
+  crate (221.9 KiB, 55.1 KiB compressed) with `grobid` 0.6.0 resolved
+  from crates.io. The live-GROBID end-to-end pass recorded for v0.2.0
+  carries over; no server run was made for this report.
+
 ## v0.2.0
 
 ### Added
