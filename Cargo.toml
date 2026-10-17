@@ -3,14 +3,14 @@ name = "grobid-bibtex"
 version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
-description = "BibTeX and BibLaTeX bibliography management built on GROBID"
+description = "BibTeX/BibLaTeX reference management built on GROBID: extraction, OpenAlex completion, citation attach and corpus pre-pass"
 license = "MIT"
 repository = "https://github.com/schmettow/grobid-bibtex"
 documentation = "https://docs.rs/grobid-bibtex"
 readme = "README.md"
 # Keep the agent instructions out of the published crate.
 exclude = ["AGENTS.md"]
-keywords = ["bibtex", "biblatex", "bibliography", "grobid", "tei"]
+keywords = ["bibtex", "biblatex", "bibliography", "citation", "grobid"]
 categories = ["science", "text-processing", "command-line-utilities"]
 
 [package.metadata.docs.rs]

@@ -33,6 +33,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of maintaining their own copies; the pre-pass logs, manifest format
   and rename policy no longer drift between hosts.
 
+### Quality
+
+- **Test coverage** (`cargo llvm-cov -p grobid-bibtex --all-features`;
+  unit, integration and binary tests; doctests are not measured on stable
+  Rust): `bibtex.rs` 97.4%, `cite.rs` 94.4%, `collection.rs` 93.9%,
+  `files.rs` 93.0%, `prepass.rs` 88.0%, `extract.rs` 80.0% and
+  `complete.rs` 66.7% line coverage — 92.2% across the library modules.
+  Including the two largely untested binaries the total is 80.9%
+  (`bin/pdf2bibtex.rs` 10.9%, `bin/refs2bibtex.rs` 0.0%).
+- **Verification**: `cargo fmt --check`, `cargo check --all-targets
+  --all-features`, `cargo test --all-features`, `cargo clippy --all-targets
+  --all-features -- -D warnings` and `cargo doc --no-deps --all-features`
+  (with `RUSTDOCFLAGS="-D warnings"`) are all green. `cargo test` runs 71
+  unit tests, 1 binary test, 2 integration tests and 17 doctests.
+  `cargo package --list` ships 19 files (with `AGENTS.md` excluded and the
+  new `src/cite.rs`/`src/prepass.rs` included), and `cargo publish --dry-run`
+  packages and verifies the crate (307.7 KiB, 73.5 KiB compressed) with
+  `grobid` 0.6.0 resolved from crates.io.
+- **Live GROBID**: no server was provided for this release pass, so the
+  binaries were not exercised end to end; the mock-server tests cover header
+  extraction, OpenAlex failure handling, renaming, merging and the pre-pass
+  observer/cancellation paths. No release blockers found.
+
 ## v0.2.1
 
 ### Added
