@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v0.3.0
+
+### Added
+
+- `cite`: reusable citation attach. `cite_keys()` scans a query for `@Key`
+  mentions; `CiteState::locate()` resolves them against a bibliography (exact
+  first, then ASCII case-insensitive) and the active corpus directories,
+  distinguishing unknown keys, missing documents, paths outside the corpora
+  and ambiguous keyed file names; `load_documents()` loads the located files
+  through a caller-supplied parser. The resolver caches the bibliography by
+  size/mtime, scans all document formats recursively (`files::collect_files`)
+  and honors relative `file` fields.
+- `prepass` (feature `pipeline`): the complete GROBID pre-pass as library
+  API — the `.ragrig_grobid.json` fingerprint manifest, `extract::headers`,
+  optional `complete::biblios`, the `Key - Full authors - Full title - Year`
+  rename policy and `collection::merge_file`. `PrepassConfig` selects the
+  folder, explicit sources, merge target and timings; `PrepassObserver`
+  reports progress and cancels; `PrepassReport` carries the counts and
+  per-file failures. `prepass()` runs without an observer.
+- `files::collect_files()` recursively lists every regular file, sorted;
+  `collect_pdfs()` is the filtered form.
+
+### Changed
+
+- `ragrig-cli` and sciscraper now call the shared `cite`/`prepass` modules
+  instead of maintaining their own copies; the pre-pass logs, manifest format
+  and rename policy no longer drift between hosts.
+
 ## v0.2.1
 
 ### Added

@@ -15,22 +15,19 @@ use serde::{Deserialize, Serialize};
 use crate::Biblio;
 use crate::bibtex::{self, FileStemOptions};
 
-/// Recursively collect all PDFs under `dir`, in sorted order.
+/// Recursively collect all regular files under `dir`, in sorted order.
 ///
 /// # Errors
 ///
 /// Returns the underlying I/O error if `dir` or a subdirectory cannot be
 /// read.
-pub fn collect_pdfs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+pub fn collect_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
         for entry in std::fs::read_dir(dir)? {
             let path = entry?.path();
             if path.is_dir() {
                 walk(&path, out)?;
-            } else if path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
-            {
+            } else {
                 out.push(path);
             }
         }
@@ -40,6 +37,22 @@ pub fn collect_pdfs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     walk(dir, &mut out)?;
     out.sort();
     Ok(out)
+}
+
+/// Recursively collect all PDFs under `dir`, in sorted order.
+///
+/// # Errors
+///
+/// Returns the underlying I/O error if `dir` or a subdirectory cannot be
+/// read.
+pub fn collect_pdfs(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
+    Ok(collect_files(dir)?
+        .into_iter()
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+        })
+        .collect())
 }
 
 /// What [`rename_pdfs`] did with one record's PDF.
@@ -399,6 +412,33 @@ mod tests {
             title: Some(title.to_string()),
             ..Biblio::default()
         }
+    }
+
+    #[test]
+    fn test_collect_files_is_sorted_and_recursive() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("nested")).expect("nested");
+        std::fs::write(dir.path().join("b.pdf"), b"pdf").expect("pdf");
+        std::fs::write(dir.path().join("a.md"), b"text").expect("text");
+        std::fs::write(dir.path().join("nested").join("c.pdf"), b"pdf").expect("pdf");
+
+        let files = collect_files(dir.path()).expect("collect");
+        assert_eq!(
+            files,
+            vec![
+                dir.path().join("a.md"),
+                dir.path().join("b.pdf"),
+                dir.path().join("nested").join("c.pdf"),
+            ]
+        );
+        let pdfs = collect_pdfs(dir.path()).expect("collect pdfs");
+        assert_eq!(
+            pdfs,
+            vec![
+                dir.path().join("b.pdf"),
+                dir.path().join("nested").join("c.pdf"),
+            ]
+        );
     }
 
     #[test]

@@ -18,11 +18,31 @@ assistants (structured, deduplicated bibliography data). The bundled
 | `complete` | Second-tier completion of extracted records against OpenAlex (feature `openalex`). |
 | `collection` | `Collection` parses, indexes and appends `.bib` files, assigns citation keys and merges records with duplicate detection (content, identifiers, PDF file name); `merge_file()` merges records into a file in one step, `load_or_new()` handles files that do not exist yet. |
 | `bibtex` | Rendering and naming for individual records: `format_entry()`, `format_all()`, `suggest_key()`, `unique_key()` and the `Author_Year_Title` file-name policies. |
-| `files` | The PDFs behind the records: recursive discovery, the rename policy (`rename_pdfs_with()` with any file-stem style and collision style) and a `Manifest` that skips unchanged files on later runs and can cache each processed file's extracted record. |
+| `files` | The PDFs behind the records: recursive discovery (`collect_pdfs()` and the generic `collect_files()`), the rename policy (`rename_pdfs_with()` with any file-stem style and collision style) and a `Manifest` that skips unchanged files on later runs and can cache each processed file's extracted record. |
+| `cite` | `@key` mention scanning (`cite_keys()`), resolution against a bibliography and the active corpus directories (`CiteState`, `Located`), and `load_documents()` with an injected loader — the citation-attach pipeline of a chat host. |
+| `prepass` (feature `pipeline`) | The full corpus pre-pass: fingerprint manifest, GROBID extraction, OpenAlex completion, metadata renaming and BibTeX merge, with progress/cancellation hooks (`PrepassObserver`) and a `PrepassReport`. |
 
 The pipeline is: discover PDFs (`files`) → extract records (`extract`) →
 complete them (`complete`) → render and merge them into a collection
 (`collection`, `bibtex`).
+
+## Citation attach and corpus maintenance
+
+The `cite` module turns a query's `@Key` mentions into documents: it scans the
+text, resolves each key against a `.bib` file (exact first, then ASCII
+case-insensitive) and the active corpus directories, and loads the located
+documents through a caller-supplied parser. Failures — an unknown key, a
+missing or ambiguous document, a path outside the corpora — are returned as
+values, never as errors.
+
+With the `pipeline` feature, `prepass` orchestrates a whole corpus: it keeps a
+fingerprint manifest (`.ragrig_grobid.json`), parses new or changed PDFs with
+GROBID, completes them against OpenAlex, renames them to
+`Key - Full authors - Full title - Year` and merges the records into a `.bib`
+file. Unchanged files are merged from the manifest cache without contacting
+the server. Hosts that need a UI pass a `PrepassObserver` for progress and
+cancellation (`prepass_with`); the manifest name and rename policy are
+published as constants so every host shares one format.
 
 ## Collection
 

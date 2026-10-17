@@ -17,6 +17,11 @@
 //! - [`bibtex`]: render individual records as BibLaTeX and derive citation
 //!   keys and file names.
 //! - [`files`]: work with the PDFs behind the records (discovery, renaming).
+//! - [`cite`]: resolve `@key` mentions in a query to documents in a corpus
+//!   (`cite_keys`, [`cite::CiteState`], [`cite::load_documents`]).
+//! - `prepass` (feature `pipeline`): the orchestration around those modules —
+//!   fingerprint, extract, complete, rename and merge a corpus, with
+//!   progress and cancellation hooks.
 //!
 //! The `pdf2bibtex` and `refs2bibtex` binaries are front ends over these
 //! modules.
@@ -53,11 +58,14 @@
 #![warn(clippy::missing_panics_doc)]
 
 pub mod bibtex;
+pub mod cite;
 pub mod collection;
 #[cfg(feature = "openalex")]
 pub mod complete;
 pub mod extract;
 pub mod files;
+#[cfg(feature = "pipeline")]
+pub mod prepass;
 
 #[cfg(feature = "openalex")]
 pub use grobid::openalex;

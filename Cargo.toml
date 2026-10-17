@@ -1,6 +1,6 @@
 [package]
 name = "grobid-bibtex"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.85"
 description = "BibTeX and BibLaTeX bibliography management built on GROBID"
@@ -21,9 +21,14 @@ all-features = true
 # Forward the OpenAlex completion tier of the `grobid` client to the
 # `--openalex` option of the bundled binaries.
 openalex = ["grobid/openalex"]
+# The reusable corpus pipeline: the GROBID pre-pass (manifest, extract,
+# complete, rename, merge) and its progress/cancellation hooks. Implies the
+# OpenAlex tier the pre-pass completes with.
+pipeline = ["openalex"]
 
 [dependencies]
 biblatex = "0.12"
+log = "0.4"
 # Publish grobid 0.6.0 before publishing this crate: the version requirement
 # must resolve against crates.io during `cargo publish`.
 # grobid = { path = "../grobid-rs", version = "0.6" }
