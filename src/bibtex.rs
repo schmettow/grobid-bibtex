@@ -10,6 +10,7 @@
 //! The `pdf2bibtex` and `refs2bibtex` binaries use these helpers.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use biblatex::{Chunk, Date, DateValue, Datetime, Entry, EntryType, Person, Spanned};
@@ -160,6 +161,42 @@ pub fn unique_key(biblio: &Biblio, used: &mut HashSet<String>) -> String {
 
 /// Number of title words in a file stem by default.
 const DEFAULT_FILE_STEM_TITLE_WORDS: usize = 10;
+
+/// Longest file name, in bytes, that common filesystems accept (POSIX
+/// `NAME_MAX` is 255).
+const MAX_FILE_NAME_BYTES: usize = 255;
+
+/// Bytes kept free in a suggested name for a collision counter
+/// (`-2`, `-3`, ...), so [`unique_path`] can number it without cutting into
+/// the year or title.
+const COLLISION_SUFFIX_BYTES: usize = 12;
+
+/// Bytes the stem may use when the file name also carries `extension` (with
+/// its dot) and `reserved` bytes for a suffix.
+fn stem_budget(extension: Option<&OsStr>, reserved: usize) -> usize {
+    let extension = extension.map_or(0, |extension| extension.to_string_lossy().len() + 1);
+    MAX_FILE_NAME_BYTES.saturating_sub(extension + reserved)
+}
+
+/// Cut `text` to at most `max_bytes` bytes on a character boundary and drop
+/// the separators a cut may leave at the end. A single word longer than the
+/// budget is cut inside the word rather than dropped.
+fn shorten_stem(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_owned();
+    }
+    let mut end = max_bytes;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let cut = &text[..end];
+    let trimmed = cut.trim_end_matches(|c: char| c.is_whitespace() || matches!(c, '-' | '_' | ','));
+    if trimmed.is_empty() {
+        cut.to_owned()
+    } else {
+        trimmed.to_owned()
+    }
+}
 
 /// How [`suggest_file_stem_with`] and [`suggest_file_name_with`] format
 /// authors, year and title.
@@ -411,7 +448,9 @@ fn full_author_names(biblio: &Biblio, ascii_only: bool) -> String {
 
 /// Suggest a file name for `path`: its directory and extension with the
 /// stem from [`suggest_file_stem`]. Returns `None` when no stem can be
-/// suggested, in which case the file should keep its name.
+/// suggested, in which case the file should keep its name. Names longer
+/// than the filesystem's limit are shortened by
+/// [`suggest_file_name_with`].
 ///
 /// ```
 /// use std::path::{Path, PathBuf};
@@ -433,15 +472,25 @@ pub fn suggest_file_name(path: impl AsRef<Path>, biblio: &Biblio) -> Option<Path
 }
 
 /// Like [`suggest_file_name`], with explicit [`FileStemOptions`].
+///
+/// The directory and extension are kept. The name is shortened to fit the
+/// filesystem's file-name limit (255 bytes, the POSIX `NAME_MAX`), cutting
+/// the stem at a character boundary and leaving room for a collision
+/// counter. Returns `None` when no stem can be suggested.
 pub fn suggest_file_name_with(
     path: impl AsRef<Path>,
     biblio: &Biblio,
     options: &FileStemOptions,
 ) -> Option<PathBuf> {
     let path = path.as_ref();
+    let extension = path.extension();
     let stem = suggest_file_stem_with(biblio, options)?;
+    let stem = shorten_stem(&stem, stem_budget(extension, COLLISION_SUFFIX_BYTES));
+    if stem.is_empty() {
+        return None;
+    }
     let mut target = path.with_file_name(stem);
-    if let Some(extension) = path.extension() {
+    if let Some(extension) = extension {
         target.set_extension(extension);
     }
     Some(target)
@@ -449,7 +498,9 @@ pub fn suggest_file_name_with(
 
 /// The first free variant of `path`, extended with a `-2`, `-3`, ... suffix
 /// before the file extension while the path already exists. Use it to turn
-/// several suggestions for the same name into collision-free names.
+/// several suggestions for the same name into collision-free names. The
+/// stem is shortened when needed so the suffixed name stays within the
+/// filesystem's 255-byte file-name limit.
 ///
 /// ```
 /// use std::path::PathBuf;
@@ -476,7 +527,9 @@ pub fn unique_path(path: impl Into<PathBuf>) -> PathBuf {
 /// The first free variant of `path` with a counter appended to the
 /// publication year: `... - 2020 - Title` becomes `... - 2020-1 - Title`,
 /// then `... - 2020-2 - Title`, and so on. Numbering the year keeps the
-/// other parts of the name (authors, title) in place.
+/// other parts of the name (authors, title) in place. When the numbered name
+/// would exceed the filesystem's 255-byte file-name limit, this falls back
+/// to [`unique_path`], which shortens the stem before its suffix.
 ///
 /// `year` must be the year the name was built from (see [`year`]). When it
 /// is `None`, empty, or does not appear as a ` - `-separated part of the
@@ -523,6 +576,12 @@ pub fn unique_path_with_year(path: impl Into<PathBuf>, year: Option<&str>) -> Pa
             })
             .collect::<Vec<_>>()
             .join(" - ");
+        // Numbering the year grows the stem; a caller-supplied name already
+        // at the limit falls back to suffix numbering, which shortens the
+        // stem before appending its counter.
+        if numbered.len() > stem_budget(target.extension(), 0) {
+            return unique_path(target);
+        }
         let mut candidate = target.with_file_name(numbered);
         if let Some(extension) = target.extension() {
             candidate.set_extension(extension);
@@ -534,14 +593,17 @@ pub fn unique_path_with_year(path: impl Into<PathBuf>, year: Option<&str>) -> Pa
     }
 }
 
-/// Insert a `-<suffix>` marker before the file extension.
+/// Insert a `-<suffix>` marker before the file extension, shortening the stem
+/// so that the resulting file name stays within the filesystem's limit.
 fn with_suffix(path: &Path, suffix: usize) -> PathBuf {
+    let marker = format!("-{suffix}");
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
+    let stem = shorten_stem(&stem, stem_budget(path.extension(), marker.len()));
     match path.extension() {
         Some(extension) => {
-            path.with_file_name(format!("{stem}-{suffix}.{}", extension.to_string_lossy()))
+            path.with_file_name(format!("{stem}{marker}.{}", extension.to_string_lossy()))
         }
-        None => path.with_file_name(format!("{stem}-{suffix}")),
+        None => path.with_file_name(format!("{stem}{marker}")),
     }
 }
 
@@ -1230,6 +1292,81 @@ mod tests {
             suggest_file_name(Path::new("paper.pdf"), &Biblio::default()),
             None
         );
+    }
+
+    #[test]
+    fn test_suggest_file_name_stays_within_the_filesystem_limit() {
+        let biblio = Biblio {
+            authors: vec![author("Kahle", Some("Brewster"))],
+            date: Some("2000".to_string()),
+            title: Some("A very long title ".repeat(40)),
+            ..Biblio::default()
+        };
+        let keyed = FileStemOptions {
+            style: FileStemStyle::Keyed,
+            ascii_only: false,
+            ..FileStemOptions::default()
+        };
+        let target =
+            suggest_file_name_with(Path::new("papers/paper.pdf"), &biblio, &keyed).expect("a name");
+        let name = target.file_name().unwrap().to_string_lossy();
+        assert!(name.len() <= 255, "{name} is {} bytes long", name.len());
+        assert!(name.starts_with("Kahle2000 - Brewster Kahle - A very long title"));
+        assert!(name.ends_with(".pdf"));
+        assert_eq!(target.parent(), Some(Path::new("papers")));
+    }
+
+    #[test]
+    fn test_long_unicode_title_is_cut_on_a_char_boundary() {
+        let biblio = Biblio {
+            authors: vec![author("Milašauskienė", Some("Brigita"))],
+            date: Some("2003".to_string()),
+            title: Some("Über die Müdigkeit ".repeat(30)),
+            ..Biblio::default()
+        };
+        let keyed = FileStemOptions {
+            style: FileStemStyle::Keyed,
+            ascii_only: false,
+            ..FileStemOptions::default()
+        };
+        let target =
+            suggest_file_name_with(Path::new("paper.pdf"), &biblio, &keyed).expect("a name");
+        let name = target.file_name().unwrap().to_string_lossy();
+        assert!(name.len() <= 255);
+        assert!(name.starts_with("Milaauskien2003 - Brigita Milašauskienė - Über"));
+        assert!(name.ends_with(".pdf"));
+    }
+
+    #[test]
+    fn test_unique_path_keeps_the_name_within_the_limit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let target = dir.path().join(format!("{}.pdf", "x".repeat(251)));
+        assert_eq!(target.file_name().unwrap().to_string_lossy().len(), 255);
+        assert_eq!(unique_path(target.clone()), target);
+
+        std::fs::write(&target, b"pdf").expect("write");
+        let second = unique_path(target.clone());
+        let name = second.file_name().unwrap().to_string_lossy();
+        assert!(name.len() <= 255, "{name} is {} bytes long", name.len());
+        assert!(name.ends_with("-2.pdf"));
+    }
+
+    #[test]
+    fn test_unique_path_with_year_keeps_the_name_within_the_limit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let prefix = "Key - Authors - ";
+        let suffix = " - 2020.pdf";
+        let middle = 255 - prefix.len() - suffix.len();
+        let target = dir
+            .path()
+            .join(format!("{prefix}{}{suffix}", "t".repeat(middle)));
+        assert_eq!(target.file_name().unwrap().to_string_lossy().len(), 255);
+        std::fs::write(&target, b"pdf").expect("write");
+
+        let second = unique_path_with_year(target, Some("2020"));
+        let name = second.file_name().unwrap().to_string_lossy();
+        assert!(name.len() <= 255, "{name} is {} bytes long", name.len());
+        assert!(name.ends_with("-2.pdf"));
     }
 
     #[test]

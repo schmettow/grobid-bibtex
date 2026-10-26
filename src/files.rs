@@ -101,7 +101,8 @@ pub enum Collision {
 /// Rename every record's PDF to the name suggested by
 /// [`bibtex::suggest_file_name`], keeping the original file extension, and
 /// update `records` to the files' final locations (so that `--link` entries
-/// point at the renamed files).
+/// point at the renamed files). Suggested names longer than the filesystem's
+/// 255-byte file-name limit are shortened to fit.
 ///
 /// Files are handled in path order, so collision suffixes (`-2`, `-3`, ...)
 /// are deterministic; a PDF that already bears the requested name is left
@@ -114,7 +115,9 @@ pub fn rename_pdfs(records: &mut [(PathBuf, Biblio)]) -> Vec<Rename> {
 }
 
 /// Like [`rename_pdfs`], with an explicit file-stem policy
-/// ([`FileStemOptions`]) and collision style ([`Collision`]).
+/// ([`FileStemOptions`]) and collision style ([`Collision`]). The suggested
+/// name is shortened to fit the filesystem's 255-byte file-name limit, and
+/// collision counters keep it within the limit.
 pub fn rename_pdfs_with(
     records: &mut [(PathBuf, Biblio)],
     stem: &FileStemOptions,
@@ -462,6 +465,41 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["a.PDF", "b.pdf", "nested/c.pdf"]);
         std::fs::remove_dir_all(&dir).expect("remove temp dir");
+    }
+
+    #[test]
+    fn test_rename_pdfs_shortens_long_titles_to_fit() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let make = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, b"pdf").expect("write file");
+            path
+        };
+        let biblio = || record("Smith", "2020", &"Very long title word ".repeat(40));
+        // Both records suggest the same over-long name; the second also
+        // needs the year collision counter.
+        let mut results = vec![(make("a.pdf"), biblio()), (make("b.pdf"), biblio())];
+        let stem = FileStemOptions {
+            style: crate::bibtex::FileStemStyle::Keyed,
+            title_words: 10,
+            ascii_only: false,
+        };
+        let events = rename_pdfs_with(&mut results, &stem, Collision::Year);
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, Rename::Renamed { .. }))
+                .count(),
+            2,
+            "events: {events:?}"
+        );
+        for (path, _) in &results {
+            let name = path.file_name().unwrap().to_string_lossy();
+            assert!(name.len() <= 255, "{name} is {} bytes long", name.len());
+            assert!(path.exists());
+        }
+        assert!(!dir.path().join("a.pdf").exists());
+        assert!(!dir.path().join("b.pdf").exists());
     }
 
     #[test]

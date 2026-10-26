@@ -12,8 +12,9 @@
 //! 3. **Complete** — parsed headers are completed against OpenAlex; failures
 //!    keep the parsed header.
 //! 4. **Rename** — with [`PrepassConfig::rename`], files are renamed to
-//!    `Key - Full authors - Full title - Year` ([`RENAME_OPTIONS`]), with
-//!    collisions numbered on the year.
+//!    `Key - Full authors - Full title - Year` ([`RENAME_OPTIONS`]), shortened
+//!    to fit the filesystem's 255-byte file-name limit, with collisions
+//!    numbered on the year.
 //! 5. **Merge** — with [`PrepassConfig::bibtex`], records are appended to the
 //!    `.bib` file with duplicate detection and a `file` link to the renamed
 //!    PDF.
@@ -44,7 +45,8 @@ pub const MANIFEST_NAME: &str = ".ragrig_grobid.json";
 
 /// Rename policy: `Key - Full authors - Full title - Year`; syntax
 /// characters are stripped, Unicode letters are kept (the citation key
-/// itself is always ASCII).
+/// itself is always ASCII). Names are shortened to fit the filesystem's
+/// 255-byte file-name limit.
 pub const RENAME_OPTIONS: FileStemOptions = FileStemOptions {
     style: FileStemStyle::Keyed,
     // `title_words` only applies to `Compact`; `Keyed` keeps the full title.

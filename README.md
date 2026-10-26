@@ -38,7 +38,8 @@ values, never as errors.
 With the `pipeline` feature, `prepass` orchestrates a whole corpus: it keeps a
 fingerprint manifest (`.ragrig_grobid.json`), parses new or changed PDFs with
 GROBID, completes them against OpenAlex, renames them to
-`Key - Full authors - Full title - Year` and merges the records into a `.bib`
+`Key - Full authors - Full title - Year` (shortened to the filesystem's
+255-byte file-name limit) and merges the records into a `.bib`
 file. Unchanged files are merged from the manifest cache without contacting
 the server. Hosts that need a UI pass a `PrepassObserver` for progress and
 cancellation (`prepass_with`); the manifest name and rename policy are
@@ -128,7 +129,8 @@ With `-r`/`--rename`, each PDF is renamed after its metadata has been
 extracted to `Author_Year_<first 10 title words>.pdf`, e.g.
 `Kahle_2000_The_Barc_model_for_continuous_variables.pdf`. Parts GROBID could
 not extract (author, year or title) are dropped, non-ASCII characters are
-removed, and colliding names get a `-2`, `-3`, ... suffix.
+removed, and colliding names get a `-2`, `-3`, ... suffix. Names longer
+than the filesystem's 255-byte limit are shortened at a character boundary.
 
 With `-l`/`--link`, each entry records the path of its PDF in a `file`
 field, so reference managers can open the document; combined with
