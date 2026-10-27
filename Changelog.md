@@ -5,7 +5,7 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## v0.3.1 — 2026-10-27
 
 ### Fixed
 
@@ -14,6 +14,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   255-byte `NAME_MAX` at a character boundary, leaving room for collision
   counters; `unique_path()` and `unique_path_with_year()` keep their
   suffix-numbered names within the same limit.
+
+### Quality
+
+- **Test coverage** (`cargo llvm-cov -p grobid-bibtex --all-features`;
+  unit, integration and binary tests; doctests are not measured on stable
+  Rust): `bibtex.rs` 97.2%, `cite.rs` 94.4%, `collection.rs` 93.9%,
+  `files.rs` 93.5%, `prepass.rs` 88.0%, `extract.rs` 80.0% and
+  `complete.rs` 66.7% line coverage — 92.3% across the library modules.
+  Including the two largely untested binaries the total is 81.4%
+  (`bin/pdf2bibtex.rs` 10.9%, `bin/refs2bibtex.rs` 0.0%); regions 83.7% and
+  functions 83.7%.
+- **Verification**: `cargo fmt --check`, `cargo check --all-targets
+  --all-features`, `cargo test --all-features`, `cargo clippy --all-targets
+  --all-features -- -D warnings` and `cargo doc --no-deps --all-features`
+  (with `RUSTDOCFLAGS="-D warnings"`) are all green. `cargo test` runs 76
+  unit tests, 1 binary test, 2 integration tests and 17 doctests — 96 passed,
+  0 failed, 0 ignored. `cargo package --list` ships 19 files (`AGENTS.md`
+  excluded), and `cargo publish --dry-run` packages and verifies the crate
+  (317.2 KiB, 75.5 KiB compressed) with `grobid` 0.6.0 resolved from
+  crates.io.
+- **Live GROBID**: no server was provided for this release pass, so the
+  `pdf2bibtex` and `refs2bibtex` binaries were not exercised end to end; the
+  mock-server tests cover header extraction, OpenAlex failure handling,
+  renaming including the long-title case, merging and the pre-pass
+  observer/cancellation paths. No release blockers found.
 
 ## v0.3.0
 
